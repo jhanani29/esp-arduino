@@ -1,0 +1,377 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WiFiMulti.h>
+#include <WebSocketsServer.h>
+#include <ESP8266WebServer.h>
+//#include <OneWire.h>
+#include <Ticker.h>
+#include <ESP8266mDNS.h>
+#include <WiFiManager.h> 
+#include <DNSServer.h>
+
+MDNSResponder mdns;
+ESP8266WiFiMulti WiFiMulti;
+
+ESP8266WebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+unsigned long time_prev=0;
+unsigned long time_now;
+bool change_update=false;
+String response;
+
+
+
+static const char PROGMEM INDEX_HTML[] = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name = "viewport" content = "width = device-width, initial-scale = 1.0, maximum-scale = 1.0, user-scalable=0">
+<title></title>
+<style>
+"body { background-color: #808080; font-family: Arial, Helvetica, Sans-Serif; Color: #000000; }"
+</style>
+<script>
+var websock;
+function start() {
+  websock = new WebSocket('ws://' + window.location.hostname + ':81/');
+  websock.onopen = function(evt) { console.log('websock open'); };
+  websock.onclose = function(evt) { console.log('websock close'); };
+  websock.onerror = function(evt) { console.log(evt); };
+  websock.onmessage = function(evt) {
+    console.log(evt);
+    
+    var e1 =document.getElementById('relay1');
+    var e2 =document.getElementById('relay2');
+    var e3 =document.getElementById('relay3');
+    var e4 =document.getElementById('relay4');
+    var e5 =document.getElementById('txt1');
+            
+    if (evt.data === 'relay1on') {
+      e1.style.backgroundColor = 'green';
+    }
+    else if(evt.data === 'relay1off') {
+      e1.style.backgroundColor = 'red';
+    }
+    else if (evt.data === 'relay2on') {
+      e2.style.backgroundColor = 'green';
+    }
+    else if(evt.data === 'relay2off') {
+      e2.style.backgroundColor = 'red';
+    }
+    else if (evt.data === 'relay3on') {
+      e3.style.backgroundColor = 'green';
+    }
+    else if(evt.data === 'relay3off') {
+      e3.style.backgroundColor = 'red';
+    }
+    else if (evt.data === 'relay4on') {
+      e4.style.backgroundColor = 'green';
+    }
+    else if(evt.data === 'relay4off') {
+      e4.style.backgroundColor = 'red';
+    }
+    else {
+      e5.value = evt.data;
+    }
+    
+  };
+}
+function buttonclick(e) {
+  websock.send(e.id);
+}
+</script>
+</head>
+<body onload="javascript:start();">
+<h1></h1>
+<br>
+<h1>FS------RS------LPG------Temp</h1>
+<input id="txt1" type="text" name="b" size="81">
+<br>
+<button style="width:100px;height:100px;background-color: green;" id="relay1"  type="button" onclick="buttonclick(this);">Relay1</button> 
+<button style="width:100px;height:100px;background-color: green;" id="relay2" type="button" onclick="buttonclick(this);">Relay2</button>
+<br><br>
+<button id="relay3" style="width:100px;height:100px;background-color: green;" type="button" onclick="buttonclick(this);">Relay3</button> 
+<button id="relay4" style="width:100px;height:100px;background-color: green;" type="button" onclick="buttonclick(this);">Relay4</button>
+</body>
+</body>
+</html>
+)rawliteral";
+
+bool relay1=false;
+bool relay2=false;
+bool relay3=false;
+bool relay4=false;
+
+// Commands sent through Web Socket
+const char RELAT1ON[] = "relay1on";
+const char RELAT1OFF[] = "relay1off";
+const char RELAT2ON[] = "relay2on";
+const char RELAT2OFF[] = "relay2off";
+const char RELAT3ON[] = "relay3on";
+const char RELAT3OFF[] = "relay3off";
+const char RELAT4ON[] = "relay4on";
+const char RELAT4OFF[] = "relay4off";
+
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length)
+{
+  Serial.printf("webSocketEvent(%d, %d, ...)\r\n", num, type);
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[%u] Disconnected!\r\n", num);
+      break;
+    case WStype_CONNECTED:
+        {
+        IPAddress ip = webSocket.remoteIP(num);
+        Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\r\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+        if (relay1) {
+          webSocket.sendTXT(num, RELAT1ON, strlen(RELAT1ON));
+        }
+        else {
+          webSocket.sendTXT(num, RELAT1OFF, strlen(RELAT1OFF));
+        }
+        if (relay2) {
+          webSocket.sendTXT(num, RELAT2ON, strlen(RELAT2ON));
+        }
+        else {
+          webSocket.sendTXT(num, RELAT2OFF, strlen(RELAT2OFF));
+        }
+        if (relay3) {
+          webSocket.sendTXT(num, RELAT3ON, strlen(RELAT3ON));
+        }
+        else {
+          webSocket.sendTXT(num, RELAT3OFF, strlen(RELAT3OFF));
+        }
+        if (relay4) {
+          webSocket.sendTXT(num, RELAT4ON, strlen(RELAT4ON));
+        }
+        else {
+          webSocket.sendTXT(num, RELAT4OFF, strlen(RELAT4OFF));
+        }
+        
+      }
+        break;
+        
+    case WStype_TEXT:
+      Serial.printf("[%u] get Text: %s\r\n", num, payload);
+      if (strcmp("relay1", (const char *)payload) == 0) {
+        if(!relay1)
+        {
+        relay1=true;
+        Serial.println("#relay1on*");
+        webSocket.broadcastTXT(RELAT1ON, strlen(RELAT1ON));
+        }
+        else
+        {
+        relay1=false;
+        Serial.println("#relay1off*");
+        webSocket.broadcastTXT(RELAT1OFF, strlen(RELAT1OFF)); 
+        }
+      }
+      else if (strcmp("relay2", (const char *)payload) == 0) {
+        if(!relay2)
+        {
+        relay2=true;
+        Serial.println("#relay2on*");
+        webSocket.broadcastTXT(RELAT2ON, strlen(RELAT2ON));
+        }
+        else
+        {
+        relay2=false;
+        Serial.println("#relay2off*");
+        webSocket.broadcastTXT(RELAT2OFF, strlen(RELAT2OFF)); 
+        }
+      }
+      else if (strcmp("relay3", (const char *)payload) == 0) {
+        if(!relay3)
+        {
+        relay3=true;
+        Serial.println("#relay3on*");
+        webSocket.broadcastTXT(RELAT3ON, strlen(RELAT3ON));
+        }
+        else
+        {
+        relay3=false;
+        Serial.println("#relay3off*");
+        webSocket.broadcastTXT(RELAT3OFF, strlen(RELAT3OFF)); 
+        }
+      }
+      else if (strcmp("relay4", (const char *)payload) == 0) {
+        if(!relay4)
+        {
+        relay4=true;
+        Serial.println("#relay4on*");
+        webSocket.broadcastTXT(RELAT4ON, strlen(RELAT4ON));
+        }
+        else
+        {
+        relay4=false;
+        Serial.println("#relay4off*");
+        webSocket.broadcastTXT(RELAT4OFF, strlen(RELAT4OFF)); 
+        }
+      }
+      else {
+        Serial.println("Unknown command");
+      }
+      break;   
+    case WStype_BIN:
+      Serial.printf("[%u] get binary length: %u\r\n", num, length);
+      hexdump(payload, length);
+
+      // echo data back to browser
+      webSocket.sendBIN(num, payload, length);
+      break;
+    default:
+      Serial.printf("Invalid WStype [%d]\r\n", type);
+      break;
+  }
+}
+
+
+
+
+
+void handleRoot()
+{
+  server.send_P(200, "text/html", INDEX_HTML);
+}
+
+void handleNotFound()
+{
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET)?"GET":"POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i=0; i<server.args(); i++){
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+int count = 0;
+
+
+void count_time(void)
+{
+  time_now=millis();
+  if(time_now-time_prev >=1000)
+  {
+  time_prev=time_now;
+  change_update=true;
+  }
+  
+}
+
+void setup() {
+  Serial.begin(9600);
+  delay(10);
+
+  // We start by connecting to a WiFi network
+
+  WiFiManager wifiManager;
+  wifiManager.autoConnect("AutoConnectAP");
+  Serial.println("connected...:)");
+  
+  Serial.println("");
+  Serial.println("WiFi connected");  
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  if (mdns.begin("espWebSock", WiFi.localIP())) {
+    Serial.println("MDNS responder started");
+    mdns.addService("http", "tcp", 80);
+    mdns.addService("ws", "tcp", 81);
+  }
+  else {
+    Serial.println("MDNS.begin failed");
+  }
+  Serial.print("Connect to http://espWebSock.local or http://");
+  Serial.println(WiFi.localIP());
+  
+  server.on("/", handleRoot);
+  server.onNotFound(handleNotFound);
+
+  server.begin();
+
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+
+//  flipper.attach_ms(2, Test);
+//  sender.attach(2, senderfunc);
+  
+}
+
+int ESPwait(String stopstr, int timeout_secs)
+{
+  bool found = false;
+  char c;
+  long timer_init;
+  long timer;
+
+  response="";
+  timer_init = millis();
+  while (!found) {
+    timer = millis();
+    if (((timer - timer_init) / 1000) > timeout_secs) { // Timeout?
+      Serial.println("!Timeout!");
+      return 0;  // timeout
+    }
+    if (Serial.available()) {
+      c = Serial.read();
+      //Serial.print(c);
+      response += c;
+      if (response.endsWith(stopstr)) {
+        found = true;
+        delay(10);
+        Serial.flush();
+        Serial.flush();
+        Serial.println();
+      }
+    } // end Serial1_available()
+  } // end while (!found)
+  return 1;
+}
+
+
+
+
+void loop() {
+  char c;
+  
+  webSocket.loop();
+  server.handleClient();
+  count_time();
+
+  if(Serial.available())
+  {
+  c=Serial.read();
+  if(c=='#')
+    {
+      if(ESPwait("*",3))
+      {
+       Serial.println(response);
+       webSocket.broadcastTXT(const_cast<char*>(response.c_str()),response.length()-1);
+       response=""; 
+      }
+    }
+
+  }
+  
+  
+//  if(change_update)
+//  {
+//  //sendTemperature();
+//  Serial.println(getTemperature());
+//  
+//  //String SoTe = getTemperature();
+//  //webSocket.broadcastTXT(const_cast<char*>(SoTe.c_str()),5);
+//
+//  change_update = false;
+//  }
+  
+}
+
