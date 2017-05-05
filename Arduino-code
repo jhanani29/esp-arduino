@@ -1,0 +1,182 @@
+//esp-arduino
+//sensors connected to arduino + esp to communicate with server
+#include <SoftwareSerial.h>
+
+
+#define rel1 A0
+#define rel2 A1
+#define rel3 A2
+#define rel4 A3
+
+#define fls 4
+#define rls 5
+#define lpg 6
+#define temp A4
+
+
+String response;
+unsigned long time_prev=0;
+unsigned long time_now;
+bool change_update=false;
+bool showespcom=true;
+int temp1;
+
+SoftwareSerial esp8266(2, 3);
+//char matstr[8];
+//int i;
+void setup() {
+  
+    pinMode(rel1, OUTPUT);
+    pinMode(rel2, OUTPUT);
+    pinMode(rel3, OUTPUT);
+    pinMode(rel4, OUTPUT);
+
+  pinMode(fls,INPUT);
+  pinMode(rls,INPUT);
+  pinMode(lpg,INPUT);
+  
+  digitalWrite(fls,HIGH);
+  digitalWrite(rls,HIGH);
+  digitalWrite(lpg,HIGH);
+
+    digitalWrite(rel1, LOW);
+    digitalWrite(rel2, LOW);
+    digitalWrite(rel3, LOW);
+    digitalWrite(rel4, LOW);
+
+  Serial.begin(9600);
+  esp8266.begin(9600);
+  Serial.println("Getting In..");
+  
+  // put your setup code here, to run once:
+
+}
+
+int ESPwait(String stopstr, int timeout_secs)
+{
+  response;
+  bool found = false;
+  char c;
+  long timer_init;
+  long timer;
+
+  response="";
+  timer_init = millis();
+  while (!found) {
+    timer = millis();
+    if (((timer - timer_init) / 1000) > timeout_secs) { // Timeout?
+      Serial.println("!Timeout!");
+      return 0;  // timeout
+    }
+    if (esp8266.available()) {
+      c = esp8266.read();
+      //Serial.print(c);
+      response += c;
+      if (response.endsWith(stopstr)) {
+        found = true;
+        delay(10);
+        esp8266.flush();
+        Serial.flush();
+        //Serial.println();
+      }
+    } // end Serial1_available()
+  } // end while (!found)
+  return 1;
+}
+
+void count_time(void)
+{
+  time_now=millis();
+  if(time_now-time_prev >=2000)
+  {
+  time_prev=time_now;
+  change_update=true;
+  }
+  
+}
+
+
+
+
+void loop() {
+  // put your main code here, to run repeatedly:
+ count_time();
+ char c;
+
+//while(1)
+//{
+//  
+//  if(Serial.available())
+//  esp8266.write(Serial.read());
+//  
+//  
+//  if(esp8266.available())
+//  Serial.write(esp8266.read());
+// }
+
+
+ if(esp8266.available())
+ {
+  c=esp8266.read();
+  if(c=='#')
+    {
+      if(ESPwait("*",3))
+        {
+        Serial.println(response);
+        if(response.endsWith("1on*"))
+        digitalWrite(rel1, HIGH);
+        else if(response.endsWith("1off*"))
+        digitalWrite(rel1, LOW);
+        else if(response.endsWith("2on*"))
+        digitalWrite(rel2, HIGH);
+        else if(response.endsWith("2off*"))
+        digitalWrite(rel2, LOW);
+        else if(response.endsWith("3on*"))
+        digitalWrite(rel3, HIGH);
+        else if(response.endsWith("3off*"))
+        digitalWrite(rel3, LOW);
+        else if(response.endsWith("4on*"))
+        digitalWrite(rel4, HIGH);
+        else if(response.endsWith("4off*"))
+        digitalWrite(rel4, LOW);
+        response="";  
+        }
+    }
+    else
+    Serial.print((String)(c));
+  
+ } //
+
+ temp1 = analogRead(temp);
+ temp1 = (5.0 * analogRead(temp)*100)/1024;
+
+ if(change_update)
+    {
+    String sendupdate;
+    sendupdate="#";
+    
+    if(!digitalRead(fls))
+    sendupdate+="HIGH\t\t\t";
+    else
+    sendupdate+="LOW\t\t\t";
+
+    if(!digitalRead(rls))
+    sendupdate+="HIGH\t\t\t";
+    else
+    sendupdate+="LOW\t\t\t";
+
+    if(!digitalRead(lpg))
+    sendupdate+="HIGH\t\t\t\t";
+    else
+    sendupdate+="LOW\t\t\t\t";
+    
+    sendupdate+=String(temp1);
+    sendupdate+="*";
+    
+    esp8266.print(sendupdate);
+    Serial.println("sendupdate");
+    change_update=false;
+    sendupdate="";
+    }
+ 
+ } //Main Loop
